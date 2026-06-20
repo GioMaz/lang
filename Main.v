@@ -33,7 +33,7 @@ Fixpoint subst (t t' : term) (var : nat) : term :=
   | Nat n => Nat n
   | Sum t1 t2 => Sum (subst t1 t' var) (subst t2 t' var)
   | Var v => if v =? var then t' else Var v
-  | Lam x _ body => if x =? var then body else subst body t' var
+  | Lam x tau body => if x =? var then Lam x tau body else Lam x tau (subst body t' var)
   | App t1 t2 => App (subst t1 t' var) (subst t2 t' var)
   end
 .
@@ -135,12 +135,12 @@ Proof.
       now apply RAppLeft.
 Qed.
 
-Lemma preservation_subst : forall (g : Gamma) t t' x tau tau',
-  synty g t tau' ->
+Lemma preservation_subst : forall t t' x tau tau',
+  synty (gamma_cons gamma_nil x tau) t tau' ->
   synty gamma_nil t' tau ->
   synty gamma_nil (subst t t' x) tau'.
 Proof.
-  intros g t t' x tau tau' H1 H2.
+  intros t t' x tau tau' H1 H2.
   generalize dependent tau'.
   induction t.
   - intros tau' H1. inversion H1. subst. cbn. apply TNat.
@@ -149,17 +149,15 @@ Proof.
     now apply TSum.
   - intros tau' H1. cbn. destruct (v =? x) eqn:Evx.
     + apply Nat.eqb_eq in Evx. subst.
-      inversion H1. subst.
-      admit.
-    + admit.
-    (* + apply TVar.
-  -  *)
-  (* - intros tau' H2 H3. inversion H2. cbn.
-    specialize (IHt (Function tau0 tau')). specialize (IHt2 tau0 H5).
-    now apply TApp with (tau := tau0). *)
+      inversion H1. subst. unfold gamma_cons in H0.
+      rewrite Nat.eqb_refl in H0. injection H0 as H0'. now subst.
+    + inversion H1. subst. unfold gamma_cons in H0.
+      rewrite Evx in H0. discriminate.
+  - intros tau' H1. cbn. destruct (v =? x) eqn:Exv.
+    + specialize (IHt tau').
 Admitted.
 
-Theorem preservation : forall t tau t', synty nil t tau -> red t t' -> synty nil t' tau.
+Theorem preservation : forall t tau t', synty gamma_nil t tau -> red t t' -> synty gamma_nil t' tau.
 Proof.
   intros t tau t' H1 H2.
   generalize dependent tau.
@@ -180,4 +178,26 @@ Proof.
     now apply TApp with (tau := tau0).
   - intros tau' H1. inversion H1. subst. specialize (IH tau0 H5).
     now apply TApp with (tau := tau0).
-  - intros tau' H1. inversion H1. subst.
+  - intros tau' H1. inversion H1. subst. inversion H3. subst.
+    now apply preservation_subst with (tau := tau0).
+Qed.
+
+Inductive red_star : term -> term -> Prop :=
+| RSRefl (t : term) : red_star t t
+| RSTrans (t t' t'' : term) : red t t' -> red_star t' t'' -> red_star t t''
+.
+Notation "t ↪⋆ t'" := (red_star t t') (at level 60).
+Definition refl := red_star (Nat 0) (Nat 0).
+Print refl.
+
+Theorem type_safety : forall t t' tau,
+  synty gamma_nil t tau ->
+  red_star t t' ->
+  (value t' \/ exists t'', red t' t'').
+Proof.
+  intros t t' tau H1 H2.
+  induction H2 as [|t t0 t' H2 H3 IH].
+  - now apply progress in H1.
+  - pose proof (preservation t tau t0 H1 H2) as HP.
+    now specialize (IH HP).
+Qed.
