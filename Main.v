@@ -8,7 +8,7 @@ Inductive type : Type :=
 | Function : type -> type -> type
 .
 
-Notation "'ℕ'" := Natural (at level 60). 
+Notation "'ℕ'" := (Natural) (at level 50). 
 Notation "tau → tau'" := (Function tau tau') (at level 60).
 
 Definition var : Type := nat.
@@ -39,29 +39,28 @@ Fixpoint subst (t t' : term) (var : nat) : term :=
 .
 Notation "a [ b / c ]" := (subst a b c).
 
-Definition Gamma : Type := list (var * type).
-Notation "x : tau" := (x, tau) (at level 60).
-
-Definition domain (g : Gamma) : list var :=
-  map fst g.
-Notation "dom( g )" := (domain g).
+Definition Gamma : Type := var -> option type.
+Definition gamma_nil : Gamma := fun x => None.
+Definition gamma_cons (g : Gamma) (x : var) (tau : type) :=
+  fun x' => if x' =? x then Some tau else g x
+.
+Notation " ∅ " := (gamma_nil).
+Notation "g , x : tau" := (gamma_cons g x tau) (at level 60).
 
 Inductive synty (g : Gamma) : term -> type -> Prop :=
 | TNat (n : nat) : synty g (Nat n) Natural
 | TSum (t t' : term) : synty g t Natural -> synty g t' Natural -> synty g (Sum t t') Natural
-| TVar (v : var) (tau : type) : In (v, tau) g -> synty g (Var v) tau
-| TLam (v : var) (tau tau' : type) (t : term) : ~ In v (domain g) -> synty ((v, tau) :: g) t tau' -> synty g (Lam v tau t) (Function tau tau')
+| TVar (v : var) (tau : type) : (g v) = Some tau -> synty g (Var v) tau
+| TLam (v : var) (tau tau' : type) (t : term) : synty (gamma_cons g v tau) t tau' -> synty g (Lam v tau t) (Function tau tau')
 | TApp (t t' : term) (tau tau' : type) : synty g t (Function tau tau') -> synty g t' tau -> synty g (App t t') tau'
 .
 Notation "g ⊢ t : tau" := (synty g t tau) (at level 60).
 
 Definition identity : term := Lam 0 Natural (Var 0).
-Example identity_typing : synty nil identity (Function Natural Natural).
+Example identity_typing : synty gamma_nil identity (Function Natural Natural).
 Proof.
   unfold identity.
-  apply TLam, TVar.
-  - auto.
-  - unfold In. left. reflexivity.
+  apply TLam. apply TVar. now cbn.
 Qed.
 
 Inductive red : term -> term -> Prop :=
@@ -74,7 +73,7 @@ Inductive red : term -> term -> Prop :=
 .
 Notation "t ↪ t'" := (red t t') (at level 60).
 
-Lemma canonicity_nat : forall t, synty nil t Natural -> value t -> exists n, t = Nat n.
+Lemma canonicity_nat : forall t, synty gamma_nil t Natural -> value t -> exists n, t = Nat n.
 Proof.
     intros t H1 H2.
     inversion H1.
@@ -84,20 +83,20 @@ Proof.
     - rewrite <- H3 in H2. inversion H2.
 Qed.
 
-Lemma canonicity_lam : forall t tau tau', synty nil t (Function tau tau') -> value t -> exists x t', t = Lam x tau t'.
+Lemma canonicity_lam : forall t tau tau', synty gamma_nil t (Function tau tau') -> value t -> exists x t', t = Lam x tau t'.
 Proof.
     intros t tau tau' H1 H2.
     inversion H1.
-    - contradiction.
+    - unfold gamma_nil in H. discriminate.
     - subst. exists v. exists t0. reflexivity.
     - subst. inversion H2.
 Qed.
 
-Theorem progress : forall t tau, synty nil t tau -> (value t \/ exists t', red t t').
+Theorem progress : forall t tau, synty gamma_nil t tau -> (value t \/ exists t', red t t').
 Proof.
   intros t tau H.
-  remember nil as g eqn:Gnil.
-  induction H as [g n|g t t' H1 IH1 H2 IH2|g v tau H|g v tau tau' t H1 H2 IH|g t t' tau tau' H1 IH1 H2 IH2]; subst.
+  remember gamma_nil as g eqn:Gnil.
+  induction H as [g n|g t t' H1 IH1 H2 IH2|g v tau H|g v tau tau' t H1 IH|g t t' tau tau' H1 IH1 H2 IH2]; subst.
   - left. apply VNat.
   - right. specialize (IH1 eq_refl). specialize (IH2 eq_refl).
     destruct IH1 as [H3|H3'], IH2 as [H4|H4'].
@@ -137,21 +136,20 @@ Proof.
 Qed.
 
 Lemma preservation_subst : forall (g : Gamma) t t' x tau tau',
-  In (x, tau) g ->
   synty g t tau' ->
-  synty nil t' tau ->
-  synty nil (subst t t' x) tau'.
+  synty gamma_nil t' tau ->
+  synty gamma_nil (subst t t' x) tau'.
 Proof.
   intros g t t' x tau tau' H1 H2.
   generalize dependent tau'.
   induction t.
-  - intros tau' H2 H3. inversion H2. subst. cbn. apply TNat.
-  - intros tau' H2 H3. inversion H2. cbn.
-    specialize (IHt1 Natural H4 H3). specialize (IHt2 Natural H6 H3).
+  - intros tau' H1. inversion H1. subst. cbn. apply TNat.
+  - intros tau' H1. inversion H1. cbn.
+    specialize (IHt1 Natural H3). specialize (IHt2 Natural H5).
     now apply TSum.
-  - intros tau' H2 H3. cbn. destruct (v =? x) eqn:Evx.
+  - intros tau' H1. cbn. destruct (v =? x) eqn:Evx.
     + apply Nat.eqb_eq in Evx. subst.
-      apply TVar in H1.
+      inversion H1. subst.
       admit.
     + admit.
     (* + apply TVar.
