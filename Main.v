@@ -1,7 +1,7 @@
 From Stdlib Require Import PeanoNat.
 From Stdlib Require Import Lists.List.
 Import ListNotations.
-From Stdlib Require Export ListDef.
+From Stdlib Require Import Program.Equality.
 
 Inductive type : Type :=
 | Natural : type
@@ -33,7 +33,7 @@ Fixpoint subst (t t' : term) (var : nat) : term :=
   | Nat n => Nat n
   | Sum t1 t2 => Sum (subst t1 t' var) (subst t2 t' var)
   | Var v => if v =? var then t' else Var v
-  | Lam x tau body => if x =? var then Lam x tau body else Lam x tau (subst body t' var)
+  | Lam x tau body => Lam x tau (subst body t' var)
   | App t1 t2 => App (subst t1 t' var) (subst t2 t' var)
   end
 .
@@ -42,7 +42,7 @@ Notation "a [ b / c ]" := (subst a b c).
 Definition Gamma : Type := var -> option type.
 Definition gamma_nil : Gamma := fun x => None.
 Definition gamma_cons (g : Gamma) (x : var) (tau : type) :=
-  fun x' => if x' =? x then Some tau else g x
+  fun x' => if x' =? x then Some tau else g x'
 .
 Notation " ∅ " := (gamma_nil).
 Notation "g , x : tau" := (gamma_cons g x tau) (at level 60).
@@ -135,27 +135,49 @@ Proof.
       now apply RAppLeft.
 Qed.
 
-Lemma preservation_subst : forall t t' x tau tau',
-  synty (gamma_cons gamma_nil x tau) t tau' ->
-  synty gamma_nil t' tau ->
-  synty gamma_nil (subst t t' x) tau'.
+Lemma weakening : forall g t tau x tau',
+  synty g t tau ->
+  synty (gamma_cons g x tau') t tau
+.
 Proof.
-  intros t t' x tau tau' H1 H2.
-  generalize dependent tau'.
-  induction t.
-  - intros tau' H1. inversion H1. subst. cbn. apply TNat.
-  - intros tau' H1. inversion H1. cbn.
-    specialize (IHt1 Natural H3). specialize (IHt2 Natural H5).
-    now apply TSum.
-  - intros tau' H1. cbn. destruct (v =? x) eqn:Evx.
-    + apply Nat.eqb_eq in Evx. subst.
-      inversion H1. subst. unfold gamma_cons in H0.
-      rewrite Nat.eqb_refl in H0. injection H0 as H0'. now subst.
-    + inversion H1. subst. unfold gamma_cons in H0.
-      rewrite Evx in H0. discriminate.
-  - intros tau' H1. cbn. destruct (v =? x) eqn:Exv.
-    + specialize (IHt tau').
 Admitted.
+
+Lemma typing_swapping : forall g x y tau tau' t tau'',
+  synty (gamma_cons (gamma_cons g x tau) y tau') t tau'' <->
+  synty (gamma_cons (gamma_cons g y tau') x tau) t tau''
+.
+Proof.
+Admitted.
+
+Lemma preservation_subst : forall g t t' x tau tau',
+  synty (gamma_cons g x tau) t tau' ->
+  synty g t' tau ->
+  synty g (subst t t' x) tau'.
+Proof.
+  intros g t t' x tau tau' H1 H2.
+  generalize dependent tau'.
+  generalize dependent g.
+  induction t as [a|t1 IH1 t2 IH2|v|v tau' t IH|t1 IH1 t2 IH2].
+  - intros g H1 tau' H2. inversion H2. subst. cbn. apply TNat.
+  - intros g H1 tau' H2. inversion H2. subst. cbn.
+    specialize (IH1 g H1 Natural H3). specialize (IH2 g H1 Natural H5).
+    now apply TSum.
+  - intros g H1 tau' H2. cbn. destruct (v =? x) eqn:Evx.
+    + apply Nat.eqb_eq in Evx. subst.
+      inversion H2. subst. unfold gamma_cons in H0.
+      rewrite Nat.eqb_refl in H0. injection H0 as H0'. now subst.
+    + inversion H2. subst. unfold gamma_cons in H0.
+      rewrite Evx in H0. now apply TVar.
+  - intros g H1 tau'' H2. inversion H2. subst.
+    apply weakening with (x := v) (tau := tau) (tau' := tau') in H1.
+    apply typing_swapping in H5.
+    specialize (IH (gamma_cons g v tau') H1 tau'0 H5).
+    cbn. now apply TLam.
+  - intros g H1 tau'' H2. inversion H2. subst.
+    specialize (IH1 g H1 (Function tau0 tau'') H3).
+    specialize (IH2 g H1 tau0 H5).
+    cbn. now apply TApp with (tau := tau0).
+Qed.
 
 Theorem preservation : forall t tau t', synty gamma_nil t tau -> red t t' -> synty gamma_nil t' tau.
 Proof.
